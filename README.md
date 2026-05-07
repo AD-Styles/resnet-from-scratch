@@ -114,11 +114,9 @@ Plain network에서 gradient는 층을 거슬러 갈 때 가중치들의 곱이 
 ├─ results/
 │  ├─ fig_01_training_curves.png        # 학습 곡선 (Plain-20 vs ResNet-20)
 │  ├─ fig_02_accuracy_comparison.png    # 정확도 격차 + Skip Connection 효과 어노테이션
-│  ├─ fig_03_layer_response.png         # ⭐ Layer Response (논문 §4.2 Fig.7 재현)
-│  ├─ best_Plain-20.pt                  # 학습된 Plain-20 가중치
-│  ├─ best_ResNet-20.pt                 # 학습된 ResNet-20 가중치
-│  ├─ history_Plain-20.json             # epoch별 정확도 history (캐시)
-│  └─ history_ResNet-20.json
+│  └─ fig_03_layer_response.png         # ⭐ Layer Response (논문 §4.2 Fig.7 재현)
+├─ .gitignore
+├─ LICENSE
 ├─ README.md
 └─ requirements.txt
 ```
