@@ -129,8 +129,6 @@ LR 분기점(epoch 15, 22)에서 두 모델 모두 정확도가 점프하는 패
 
 마지막에 추가한 fig_03 작업이 가장 인상 깊었습니다. 학습된 Plain-20 과 ResNet-20 의 모든 BatchNorm 출력에 forward hook 을 걸어 layer 별 응답의 표준편차(std) 를 측정하고, 논문 §4.2 Figure 7 의 형식대로 std 내림차순으로 정렬해 두 모델의 응답 크기를 비교하는 분석입니다. 사실 그 전까지는 *"ResNet 이 잘 되는 이유는 gradient vanishing 을 해결하기 때문"* 정도로만 알고 있었고, 그 이상은 굳이 파고든 적이 없었습니다. 그런데 막상 측정해보니 ResNet 의 평균 응답이 Plain 보다 10.7% 작게 나왔습니다. 솔직히 처음에는 이 숫자가 정확히 뭘 뜻하는지 바로 안 와닿았습니다. §3.1 을 다시 읽어보고 나서야 *"잔차 F(x) 가 0 에 가깝다"* 는 가설을 지금 데이터로 직접 확인하고 있다는 게 정리됐습니다. 논문에서는 §4.2 Figure 7 한 페이지로 짧게 지나가는 부분인데, 직접 그려놓고 보니 그 한 장이 ResNet 가설의 가장 결정적인 증거였습니다. Skip Connection 을 그 전에는 *gradient 우회로* 정도로만 봤었는데, 이번 분석을 거치면서 *모델을 identity 근처로 끌어당기는 inductive bias* 라는 좀 더 구체적인 표현으로 이해하게 됐습니다. 가중치가 실제로 어떻게 행동하는지까지 데이터로 들여다본 건 이번이 처음이라, 프로젝트에서 가장 기억에 남는 작업이 됐습니다.
 
-다음에는 이 코드를 베이스로 Pre-activation ResNet (*Identity Mappings in Deep Residual Networks*) 을 비교해보고 싶습니다. Skip Connection 의 위치(post-activation vs pre-activation) 가 fig_03 의 Layer Response 패턴을 어떻게 바꾸는지가 궁금합니다.
-
 ---
 
 ## 🔗 참고 자료 (References)
