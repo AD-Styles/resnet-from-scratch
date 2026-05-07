@@ -1,3 +1,6 @@
+# Python 3.8+ 권장
+# CUDA는 자동 감지됩니다 (GPU 없으면 CPU에서 동작, 학습 시간만 길어짐)
+
 torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0
