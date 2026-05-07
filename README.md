@@ -43,8 +43,6 @@ Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 �
 
 ## 🏗️ ResNet의 메커니즘과 구현 (Core Mechanism & Implementation)
 
-논문의 6대 핵심 메커니즘을 *이론(Theory) → 구현(Implementation)* 한 자리에 정리
-
 ### 📋 6대 메커니즘 요약
 
 | # | 메커니즘 *(논문 §)* | 핵심 개념 (Theory) | 구현 · 검증 (Implementation) |
@@ -66,10 +64,6 @@ Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 �
 | Stage 3 | n × Block (32→64, stride=2) | 8×8×64 |
 | Pool | Global Average Pooling | 64 |
 | FC | Linear(64→10) | 10 |
-
-> 더 깊은 ResNet-50/101/152 는 `BasicBlock` 대신 **Bottleneck Block** (1×1 → 3×3 → 1×1) 을 사용해 계산량을 1/9 로 줄이지만, 본 CIFAR-10 실험에서는 사용하지 않습니다.
->
-> **Batch Normalization** (Ioffe & Szegedy, 2015) 과 **He Initialization** (He et al., 2015 ICCV) 은 ResNet 논문의 기여가 아니라 *§3.4 가 사용하는 외부 기술* 입니다. 두 기술 없이는 깊은 학습이 시작조차 안 되므로, 본 구현이 정확히 적용했음을 명시합니다.
 
 ---
 
