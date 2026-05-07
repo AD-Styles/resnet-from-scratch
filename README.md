@@ -43,7 +43,7 @@ Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 �
 
 ## 🏗️ ResNet의 메커니즘과 구현 (Core Mechanism & Implementation)
 
-논문의 6대 핵심 메커니즘을 *이론(Theory) → 구현(Implementation)* 한 자리에 정리합니다. 각 행이 한 메커니즘의 *핵심 개념* 과 *본 포트폴리오에서의 구현·검증 방식* 을 함께 보여줍니다.
+논문의 6대 핵심 메커니즘을 *이론(Theory) → 구현(Implementation)* 한 자리에 정리
 
 ### 📋 6대 메커니즘 요약
 
