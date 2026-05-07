@@ -49,12 +49,12 @@ Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 �
 
 | # | 메커니즘 *(논문 §)* | 핵심 개념 (Theory) | 구현 · 검증 (Implementation) |
 |:-:|:------------------|:------------------|:--------------------------|
-| 1 | **Degradation Problem** *(§1)* | 깊은 plain net 의 **학습 오류조차도** 얕은 net 보다 높음 → *표현력의 한계가 아니라 최적화의 어려움*. 논문 인용: *"깊은 모델은 적어도 얕은 모델만큼은 해야 한다(identity layer만 추가하면 됨), 그런데 SGD가 그 해를 못 찾는다"* | 본 실험이 §2 잔차 학습으로 이 문제를 해결할 수 있음을 직접 검증 (fig_01 · 02) |
-| 2 | **Residual Learning** *(§3.1, §3.2)* | 기존: `H(x)` 를 **직접** 학습 → ResNet: `H(x) = F(x) + x`, **잔차 `F(x) = H(x) − x` 만 학습**. 최적해가 identity 매핑에 가까울 때 `F(x) → 0` 으로 보내는 게 conv·BN 으로 identity 를 흉내내기보다 훨씬 쉬움 | `BasicBlock`: 3×3 Conv·BN 두 번 후 forward 끝에 `out + self.shortcut(x)` 한 줄로 입력 더함 (§3.2 Option B). `PlainBlock`: 그 한 줄만 빠진 블록. **두 블록의 유일한 차이는 정확히 그 한 줄** |
-| 3 | **Skip Connection 의 Gradient 효과** *(§3.1)* | Plain: gradient = `W_N · ... · W_1` 누적 → 1 미만 가중치는 0 으로 수렴(**Vanishing**). ResNet: 미분하면 `∂L/∂x = ∂L/∂y · (∂F/∂x + 1)` — **"+1"** 항이 항상 살아있어 `∂F/∂x` 가 어떤 값이든 gradient 가 0이 되지 않음 | 152층까지 학습 가능한 *수학적 근거*. fig_01 학습 곡선의 일관된 격차가 이 효과의 정량 증거 |
-| 4 | **CIFAR-10 6n+2 Architecture** *(§4.2)* | `Conv(3×3, 16) → Stage 1·2·3 (각 n block, {16, 32, 64} filter, stride=2 다운샘플) → GAP → FC(10)` 의 6n+2 층 구조. `n=3` 이면 ResNet-20 (아래 상세 표) | `CIFAR10Net(n=3, block=BasicBlock 또는 PlainBlock)` — 한 클래스로 두 모델 모두 표현. **block 추상화 하나로 두 모델이 동일한 학습 루프를 공유** |
-| 5 | **Layer Response 가설** ⭐ *(§4.2 Fig.7)* | *"학습된 ResNet 의 layer 응답이 plain network 보다 작다 → 잔차 F(x) 가 실제로 0에 가까운 함수"*. 논문에서 분량은 짧지만 ResNet 핵심 가설을 뒷받침하는 **가장 결정적인 실증** | 학습된 두 모델의 모든 BatchNorm 출력에 PyTorch forward hook 을 걸어 layer별 std 측정 → fig_03 에서 정량 검증 |
-| 6 | **Hyperparameters** *(§3.4, §4.2)* | SGD (momentum=0.9, weight_decay=1e-4), LR 0.1 → 분기점 ÷10, 4-pixel padding + random crop + horizontal flip, He init (`Var(W) = 2/n_in`, ReLU 에 맞춤) | 논문 설정 그대로. Epochs 만 빠른 데모용으로 30 (논문은 200, LR 분기점 [15, 22] = 논문 [100, 150] / 200 의 비율 유지) |
+| 1 | **Degradation Problem** *(§1)* | 깊은 plain net 의 학습 오류조차 얕은 net 보다 높음 → 표현력 한계가 아니라 **최적화의 어려움** | 본 실험이 §2 잔차 학습으로 이 문제를 해결할 수 있음을 검증 (fig_01·02) |
+| 2 | **Residual Learning** *(§3.1, §3.2)* | `H(x)` 를 직접 학습하는 대신 잔차 `F(x) = H(x) − x` 만 학습. 최적해가 identity 에 가까우면 `F(x) → 0` 으로 보내는 편이 훨씬 쉬움 | `BasicBlock` forward 끝의 `out + self.shortcut(x)` 한 줄(§3.2 Option B). `PlainBlock` 은 그 한 줄만 빠짐 — **유일한 차이** |
+| 3 | **Skip Connection 의 Gradient 효과** *(§3.1)* | 미분하면 `∂L/∂x = ∂L/∂y · (∂F/∂x + 1)` — **"+1" 항이 항상 살아있어** gradient 가 0 이 되지 않음 (Plain 은 가중치 곱이 누적되며 vanishing) | 152층까지 학습 가능한 수학적 근거. fig_01 의 일관된 격차가 정량 증거 |
+| 4 | **CIFAR-10 6n+2 Architecture** *(§4.2)* | Conv → Stage 1·2·3 (각 `n` block, {16, 32, 64} filter) → GAP → FC. **`n=3` 이면 ResNet-20** *(상세는 아래 표)* | `CIFAR10Net(n=3, block=...)` — 한 클래스로 두 모델 표현, 동일 학습 루프 공유 |
+| 5 | **Layer Response 가설** ⭐ *(§4.2 Fig.7)* | *"학습된 ResNet 의 layer 응답이 Plain 보다 작다 → 잔차 F(x) 가 0 에 가까운 함수"*. 논문 분량은 짧지만 ResNet 핵심 가설의 **가장 결정적인 실증** | 두 모델의 모든 BatchNorm 출력에 forward hook → layer 별 std 측정 (fig_03) |
+| 6 | **Hyperparameters** *(§3.4, §4.2)* | SGD (momentum 0.9, weight_decay 1e-4), LR 0.1 → 분기점에서 ÷10, 4-pixel padding + random crop + horizontal flip, He init | 논문 설정 그대로. Epochs 만 데모용 30 (논문 200, LR 분기점 비율 유지) |
 
 ### 📐 6n+2 Architecture 상세 *(메커니즘 #4 의 구체)*
 
@@ -110,21 +110,12 @@ LR 분기점(epoch 15, 22)에서 두 모델 모두 정확도가 점프하는 패
 
 ## ✨ 분석 및 발견 (Key Findings & Analysis)
 
-### 1. Skip Connection 의 효과는 표현력이 아니라 최적화 문제였다
-
-처음에는 같은 깊이·같은 파라미터에서 한 줄 차이로 +2.19%p 가 나는 게 잘 와닿지 않았습니다. 표현력(capacity) 으로만 따지면 Plain 도 identity 매핑 정도는 충분히 학습할 수 있어야 하니까요. 어떤 layer 가 입력을 그대로 통과시키도록 가중치를 맞추면 되는 단순한 일인데, fig_02 결과를 보면 같은 조건의 Plain 이 그걸 못 하고 있다는 게 분명히 보였습니다. 결국 차이는 *"Plain 이 표현할 수 있느냐"* 가 아니라 *"SGD 가 그 해를 찾을 수 있느냐"* 의 문제였고, 논문 §1 의 degradation problem 본질이 통제 비교 한 번으로 깔끔하게 분리됐습니다.
-
-### 2. 잔차는 정말 0 에 가까웠다 ⭐
-
-fig_03 을 그릴 때 결과가 어떻게 나올지 솔직히 자신이 없었습니다. ResNet 의 BN 응답이 정말로 Plain 보다 작을지, 비슷할지, 오히려 클지는 측정 전까지 가설로만 알고 있었거든요. 막상 측정해보니 평균 std 가 ResNet 0.781 vs Plain 0.875 로 약 10.7% 작았고, 첫 두 layer 를 제외하면 마지막 layer 까지 격차가 안정적으로 유지됐습니다. §3.1 의 *"잔차 F(x) 가 0 에 가까울수록 학습이 쉽다"* 가설이 학습된 가중치에 실제로 남아 있다는 의미였고, Skip Connection 이 단순한 gradient 우회로가 아니라 모델을 identity 근처에 머물게 하는 inductive bias 라는 점이 그제서야 와닿았습니다.
-
-### 3. 이론과 실증, 두 효과가 결합되어야 깊은 망 학습이 동작한다
-
-논문을 처음 읽을 때는 §3.1 의 두 주장이 서로 어떻게 연결되는지 헷갈렸습니다. 하나는 *"gradient 가 `(∂F/∂x + 1)` 의 +1 항 덕에 vanishing 되지 않는다"* 는 이론적 보장이고, 다른 하나는 *"학습된 모델의 잔차가 실제로 0 에 가깝다"* 는 실증인데, 둘이 별개의 이야기처럼 들렸습니다. 두 실험(fig_01·02 의 학습 가능성 + fig_03 의 layer response) 을 직접 해보고 나서야, 이 두 효과가 *결합* 되어야 152층까지 학습이 현실에서 동작한다는 게 정리됐습니다. 이론만 있고 실제 모델이 복잡한 함수를 학습하려 들면 안 되고, 실증만 있고 gradient 가 죽어버리면 학습 자체가 시작도 안 되니까요.
-
-### 4. MultiStep LR 의 효과가 학습 곡선의 모양으로 찍힌다
-
-fig_01 에서 epoch 15 와 22 에 두 모델이 동시에 점프하는 모습이 가장 눈에 띄었습니다. 큰 LR 로 충분히 탐색한 뒤 두 번에 걸쳐 LR 을 ÷10 씩 줄이는 MultiStep 스케줄의 효과가, 수식이나 설명이 아니라 곡선의 두 차례 점프로 그대로 보였습니다. 논문이 200 epoch 동안 굳이 이 두 분기점만 고집한 이유가 그림 한 장으로 이해되는 순간이었습니다.
+| 발견 | 의미 |
+|:-----|:-----|
+| **Skip Connection의 효과는 표현력이 아니라 최적화** | 같은 깊이·같은 파라미터에서 ResNet이 Plain보다 +2.19%p 좋음. 격차의 원인이 *모델이 표현할 수 있는 함수의 종류*가 아니라 *SGD가 좋은 해를 찾을 수 있는가*의 문제라는 게 통제 비교로 분리됨 |
+| **잔차는 정말 0에 가까웠다** ⭐ | ResNet의 BN 출력 std가 Plain보다 평균 10.7% 작음. 논문 §3.1 가설이 학습된 가중치의 행동으로 입증됨. *Skip Connection은 단지 gradient 우회로가 아니라 모델을 identity 근처에 머물게 하는 inductive bias* |
+| **두 효과가 결합되어 깊은 망 학습이 가능** | (1) gradient flow에서 `(∂F/∂x + 1)`의 "+1" 항이 vanishing 방지 — *이론* (2) 실제로 모델이 F(x)를 0에 가깝게 학습 — *실증*. 두 효과가 결합되어 152층 학습이 현실에서 동작 |
+| **LR MultiStep의 효과가 곡선에서 보임** | epoch 15, 22에서 LR을 10배씩 낮출 때마다 두 모델 모두 정확도가 점프. *"넓게 탐색 → 두 번 좁히기"* 전략의 효과가 학습 곡선에 그대로 찍힘 |
 
 ---
 
