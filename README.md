@@ -24,71 +24,6 @@ Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 �
 
 ---
 
-## 🎯 논문 핵심 개념 정리 (Core Concepts from the Paper)
-
-### 1. Degradation Problem — ResNet이 풀려고 한 문제 *(논문 §1)*
-
-직관적으로 *깊은 네트워크 = 더 강력한 표현력* 일 것 같지만, 실제로는 어느 깊이부터 깊어질수록 정확도가 떨어지는 현상이 발견됐습니다. 결정적인 증거는 — **학습 오류조차도** 깊은 네트워크에서 더 높았다는 점입니다.
-
-> 과적합이라면 학습 오류는 낮아야 합니다. 학습 오류가 높다는 건 **표현력의 한계가 아니라 최적화의 어려움** 이라는 뜻입니다.
-
-논문은 이걸 깔끔하게 짚습니다 — *"깊은 모델은 적어도 얕은 모델만큼은 해야 한다 (identity layer만 추가하면 되니까). 그런데 SGD가 그 해를 못 찾는다."* 이게 ResNet이 풀어야 했던 문제입니다.
-
-### 2. Residual Learning — 학습 목표를 재정의 *(논문 §3.1)*
-
-기존 방식은 네트워크가 출력 `H(x)`를 **직접** 학습합니다. ResNet은 입력 `x`를 그대로 더해 두고, 차이만큼 — 즉 잔차 `F(x) = H(x) − x` — 만 학습합니다 (`H(x) = F(x) + x`, **Skip Connection**).
-
-왜 이게 쉬운가? 만약 최적해가 identity 매핑(`H(x) = x`)에 가깝다면:
-- **기존**: 여러 conv·BN 층이 정확히 identity를 흉내내야 함 → 어려움
-- **ResNet**: `F(x) → 0` 으로 보내면 됨 → 가중치를 0에 가깝게 보내는 게 훨씬 쉬움
-
-학습 목표를 *"전체 함수 학습"* 에서 *"입력과의 차이만 학습"* 으로 바꾼 게 핵심입니다.
-
-### 3. Skip Connection이 Gradient를 살리는 원리 *(논문 §3.1)*
-
-Plain network에서 gradient는 층을 거슬러 갈 때 가중치들의 곱(`W_N · W_{N-1} · ... · W_1`)이 누적됩니다. 가중치가 1보다 작으면 곱이 0으로 수렴 → **Gradient Vanishing**.
-
-반면 ResNet의 `y = F(x) + x` 를 미분하면 `∂L/∂x = ∂L/∂y · (∂F/∂x + 1)` 이 되어 — **"+1"** 항이 항상 살아있어 `∂F/∂x`가 어떤 값이든 gradient가 0이 될 수 없습니다. 이 한 줄이 152층까지 학습 가능하게 만든 수학적 이유입니다.
-
-### 4. CIFAR-10 ResNet 구조 — 6n+2 Layers *(논문 §4.2)*
-
-논문은 CIFAR-10용으로 가벼운 6n+2 층 구조를 정의합니다:
-
-| Stage | 구성 | 출력 크기 |
-|:------|:-----|:---------|
-| Conv1 | 3×3 Conv, 16 filters | 32×32×16 |
-| Stage 1 | n × Block (16→16) | 32×32×16 |
-| Stage 2 | n × Block (16→32, stride=2) | 16×16×32 |
-| Stage 3 | n × Block (32→64, stride=2) | 8×8×64 |
-| Pool | Global Average Pooling | 64 |
-| FC | Linear(64→10) | 10 |
-
-본 실험은 `n=3` (20 layers) 만 사용합니다. 두 모델은 Block의 종류만 다릅니다:
-- **Plain-20**: `PlainBlock` (skip connection 없음)
-- **ResNet-20**: `BasicBlock` (skip connection 있음)
-
-> 더 깊은 ResNet-50/101/152 는 `BasicBlock` 대신 **Bottleneck Block** (1×1 → 3×3 → 1×1) 을 사용해 계산량을 1/9로 줄이지만, 본 CIFAR-10 실험에서는 사용하지 않습니다.
-
-### 5. Layer Response — 가설을 데이터로 검증 *(논문 §4.2 Figure 7)* ⭐
-
-논문 §4.2 Figure 7은 분량은 짧지만 ResNet의 핵심 가설을 뒷받침하는 가장 결정적인 실증입니다. *"학습된 ResNet의 layer 응답이 plain network보다 작다 → 잔차 F(x)가 실제로 0에 가까운 함수"*. 본 포트폴리오는 BatchNorm 출력에 forward hook을 걸어 이 분석을 직접 재현합니다(fig_03).
-
-### 6. Hyperparameters *(논문 §3.4, §4.2)*
-
-| 항목 | 값 |
-|:-----|:---|
-| Optimizer | SGD (momentum=0.9, weight_decay=1e-4) |
-| Learning Rate | 0.1, 분기점에서 ÷10 |
-| Batch Size | 128 |
-| Epochs | 30 (빠른 데모용; 논문은 200) |
-| LR Schedule | epoch 15·22 에서 ÷10 (논문 비율 50%, 75% 유지) |
-| Augmentation | 4-pixel padding + random crop + horizontal flip |
-| Initialization | He init (`Var(W) = 2/n_in`, ReLU에 맞춤) |
-
-> **Batch Normalization** (Ioffe & Szegedy, 2015) 과 **He Initialization** (He et al., 2015 ICCV) 은 ResNet 논문의 기여가 아니라 *§3.4가 사용하는 외부 기술* 입니다. 두 기술 없이는 깊은 학습이 시작조차 안 되므로, 본 구현이 정확히 적용했음을 명시합니다.
-
----
-
 ## 📂 프로젝트 구조 (Project Structure)
 
 ```
@@ -106,19 +41,71 @@ Plain network에서 gradient는 층을 거슬러 갈 때 가중치들의 곱(`W_
 
 ---
 
-## 🏗️ 핵심 구현 (Core Implementation)
+## 🏗️ ResNet의 메커니즘과 구현 (Core Mechanism & Implementation)
 
-### BasicBlock — Skip Connection이 있는 블록
+### 1. Degradation Problem — ResNet이 풀려고 한 문제 *(논문 §1)*
 
-3×3 Conv → BN → ReLU → 3×3 Conv → BN 까지 진행한 뒤, forward의 마지막에 `out + self.shortcut(x)` 한 줄로 입력 `x`를 더하고 ReLU를 통과시킵니다 — 이 한 줄이 `H(x) = F(x) + x` 의 코드 표현입니다. 입력과 출력의 차원이 바뀌는 stage 경계(stride=2 + 채널 변경)에서만 shortcut에 1×1 conv를 두어 차원을 맞춥니다 (논문 §3.2 Option B). 차원이 같은 경우 shortcut은 단순 identity (`nn.Identity()`).
+직관적으로 *깊은 네트워크 = 더 강력한 표현력* 일 것 같지만, 실제로는 어느 깊이부터 깊어질수록 정확도가 떨어지는 현상이 발견됐습니다. 결정적인 증거는 — **학습 오류조차도** 깊은 네트워크에서 더 높았다는 점입니다.
 
-### PlainBlock — Skip Connection이 없는 비교용 블록
+> 과적합이라면 학습 오류는 낮아야 합니다. 학습 오류가 높다는 건 **표현력의 한계가 아니라 최적화의 어려움** 이라는 뜻입니다.
 
-BasicBlock의 conv·BN 정의를 모두 그대로 갖되, forward에서 `out + self.shortcut(x)` 한 줄만 빠진 블록입니다. **두 블록의 유일한 차이는 정확히 그 한 줄**이고, 본 실험은 그 한 줄이 만드는 격차를 측정합니다.
+논문은 이걸 깔끔하게 짚습니다 — *"깊은 모델은 적어도 얕은 모델만큼은 해야 한다 (identity layer만 추가하면 되니까). 그런데 SGD가 그 해를 못 찾는다."* 이게 ResNet이 풀어야 했던 문제입니다.
 
-### CIFAR10Net — 같은 클래스로 ResNet/Plain 둘 다 만들기
+### 2. Residual Learning + BasicBlock vs PlainBlock — 한 줄의 차이 *(논문 §3.1, §3.2)*
 
-`block` 인자만 바꾸면 동일한 깊이·파라미터의 두 모델이 만들어집니다 — `block=BasicBlock` 이면 ResNet-20, `block=PlainBlock` 이면 같은 깊이의 비교 baseline. block 추상화 하나로 두 모델이 동일한 학습 루프를 공유하도록 설계해, *비교의 본질*이 코드 구조에도 그대로 반영됩니다.
+**이론**: 기존 방식은 네트워크가 출력 `H(x)`를 **직접** 학습합니다. ResNet은 입력 `x`를 그대로 더해 두고, 차이만큼 — 즉 잔차 `F(x) = H(x) − x` — 만 학습합니다 (`H(x) = F(x) + x`, **Skip Connection**).
+
+왜 이게 쉬운가? 만약 최적해가 identity 매핑(`H(x) = x`)에 가깝다면:
+- **기존**: 여러 conv·BN 층이 정확히 identity를 흉내내야 함 → 어려움
+- **ResNet**: `F(x) → 0` 으로 보내면 됨 → 가중치를 0에 가깝게 보내는 게 훨씬 쉬움
+
+**구현**: 본 포트폴리오는 이 이론을 두 PyTorch 블록으로 표현합니다:
+
+- **`BasicBlock`** (Skip Connection 있음): 3×3 Conv → BN → ReLU → 3×3 Conv → BN 까지 진행한 뒤, forward의 마지막에 `out + self.shortcut(x)` 한 줄로 입력 `x` 를 더하고 ReLU 를 통과시킵니다 — **이 한 줄이 `H(x) = F(x) + x` 의 코드 표현**입니다. 차원이 바뀌는 stage 경계(stride=2 + 채널 변경)에서만 shortcut 에 1×1 conv 를 두어 차원을 맞춥니다 (논문 §3.2 Option B). 차원이 같은 경우 shortcut 은 단순 identity (`nn.Identity()`).
+- **`PlainBlock`** (Skip Connection 없음): BasicBlock 의 conv·BN 정의를 모두 그대로 갖되, forward 에서 `out + self.shortcut(x)` 한 줄만 빠진 블록.
+
+**두 블록의 유일한 차이는 정확히 그 한 줄**이고, 본 실험은 *그 한 줄이 만드는 격차*를 측정합니다.
+
+### 3. Skip Connection이 Gradient를 살리는 원리 *(논문 §3.1)*
+
+Plain network에서 gradient는 층을 거슬러 갈 때 가중치들의 곱(`W_N · W_{N-1} · ... · W_1`)이 누적됩니다. 가중치가 1보다 작으면 곱이 0으로 수렴 → **Gradient Vanishing**.
+
+반면 ResNet의 `y = F(x) + x` 를 미분하면 `∂L/∂x = ∂L/∂y · (∂F/∂x + 1)` 이 되어 — **"+1"** 항이 항상 살아있어 `∂F/∂x`가 어떤 값이든 gradient가 0이 될 수 없습니다. 이 한 줄이 152층까지 학습 가능하게 만든 수학적 이유입니다.
+
+### 4. CIFAR-10 6n+2 Architecture + CIFAR10Net 추상화 *(논문 §4.2)*
+
+논문은 CIFAR-10용으로 가벼운 6n+2 층 구조를 정의합니다:
+
+| Stage | 구성 | 출력 크기 |
+|:------|:-----|:---------|
+| Conv1 | 3×3 Conv, 16 filters | 32×32×16 |
+| Stage 1 | n × Block (16→16) | 32×32×16 |
+| Stage 2 | n × Block (16→32, stride=2) | 16×16×32 |
+| Stage 3 | n × Block (32→64, stride=2) | 8×8×64 |
+| Pool | Global Average Pooling | 64 |
+| FC | Linear(64→10) | 10 |
+
+본 실험은 `n=3` (20 layers) 만 사용합니다. **`CIFAR10Net` 클래스는 `block` 인자 하나로 두 모델을 모두 표현** — `block=BasicBlock` 이면 ResNet-20, `block=PlainBlock` 이면 같은 깊이·파라미터의 비교 baseline. block 추상화 하나로 두 모델이 동일한 학습 루프를 공유하도록 설계해, *비교의 본질이 코드 구조에도 그대로 반영*됩니다.
+
+> 더 깊은 ResNet-50/101/152 는 `BasicBlock` 대신 **Bottleneck Block** (1×1 → 3×3 → 1×1) 을 사용해 계산량을 1/9로 줄이지만, 본 CIFAR-10 실험에서는 사용하지 않습니다.
+
+### 5. Layer Response — 가설을 데이터로 검증 *(논문 §4.2 Figure 7)* ⭐
+
+논문 §4.2 Figure 7은 분량은 짧지만 ResNet의 핵심 가설을 뒷받침하는 가장 결정적인 실증입니다. *"학습된 ResNet의 layer 응답이 plain network보다 작다 → 잔차 F(x)가 실제로 0에 가까운 함수"*. 본 포트폴리오는 BatchNorm 출력에 forward hook을 걸어 이 분석을 직접 재현합니다 (fig_03 참고).
+
+### 6. Hyperparameters *(논문 §3.4, §4.2)*
+
+| 항목 | 값 |
+|:-----|:---|
+| Optimizer | SGD (momentum=0.9, weight_decay=1e-4) |
+| Learning Rate | 0.1, 분기점에서 ÷10 |
+| Batch Size | 128 |
+| Epochs | 30 (빠른 데모용; 논문은 200) |
+| LR Schedule | epoch 15·22 에서 ÷10 (논문 비율 50%, 75% 유지) |
+| Augmentation | 4-pixel padding + random crop + horizontal flip |
+| Initialization | He init (`Var(W) = 2/n_in`, ReLU에 맞춤) |
+
+> **Batch Normalization** (Ioffe & Szegedy, 2015) 과 **He Initialization** (He et al., 2015 ICCV) 은 ResNet 논문의 기여가 아니라 *§3.4가 사용하는 외부 기술* 입니다. 두 기술 없이는 깊은 학습이 시작조차 안 되므로, 본 구현이 정확히 적용했음을 명시합니다.
 
 ---
 
