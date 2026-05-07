@@ -1,235 +1,191 @@
-# 🧠 ResNet Transfer Learning & Fine-Tuning on CIFAR-10
-### **ResNet50 vs ResNet101** — ImageNet 사전학습 모델을 CIFAR-10에 전이학습/파인튜닝하여 Skip Connection의 원리, Stage A/B 학습 전략, 모델 효율성을 비교 분석한 프로젝트
- 
+# 🧠 ResNet From Scratch — Skip Connection의 효과 검증
+### "Deep Residual Learning for Image Recognition" (He et al., CVPR 2016) 핵심 가설을 PyTorch로 재현
+
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-FF6F00?style=for-the-badge&logo=tensorflow&logoColor=white)
-![Keras](https://img.shields.io/badge/Keras-D00000?style=for-the-badge&logo=Keras&logoColor=white)
-![Kaggle](https://img.shields.io/badge/Kaggle-20BEFF?style=for-the-badge&logo=Kaggle&logoColor=white)
-![NumPy](https://img.shields.io/badge/NumPy-013243?style=for-the-badge&logo=numpy&logoColor=white)
-![Pandas](https://img.shields.io/badge/Pandas-150458?style=for-the-badge&logo=pandas&logoColor=white)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![CIFAR-10](https://img.shields.io/badge/Dataset-CIFAR--10-FF6B6B?style=for-the-badge)
+![Paper](https://img.shields.io/badge/Paper-CVPR_2016-1976D2?style=for-the-badge)
 
 ---
 
 ## 📌 프로젝트 요약 (Project Overview)
 
-딥러닝에서 "깊으면 깊을수록 좋다"는 직관은 오랫동안 사실이 아니었습니다. 20층만 넘어가도 gradient vanishing으로 인해 얕은 네트워크보다 성능이 떨어지는 **Degradation Problem**이 발생했기 때문입니다. ResNet 은 이 문제를 **Skip Connection(잔차 연결)** 이라는 단순하지만 강력한 아이디어로 해결하여, 152층짜리 네트워크도 안정적으로 학습할 수 있게 만들었습니다.
+ResNet 논문의 핵심 메시지는 한 줄로 요약됩니다 — *"네트워크가 깊어질수록 학습이 어려워지는 문제(Degradation Problem)를, 잔차 연결(`H(x) = F(x) + x`) 한 줄로 해결한다."* 이 포트폴리오는 그 주장을 두 가지 실험으로 직접 검증합니다.
+
+**1. 같은 조건에서 Skip Connection 한 줄만 빼면 어떻게 되는가?**
+Plain-20과 ResNet-20은 깊이(20층)·파라미터(0.27M)·학습 설정이 모두 같습니다. `out + self.shortcut(x)` 한 줄의 유무가 정확히 어떤 차이를 만드는지 측정합니다.
+
+**2. 학습된 ResNet은 정말 잔차를 0에 가깝게 학습하는가?** ⭐
+논문 §3.1의 핵심 가설은 *"F(x)가 0에 가깝기 때문에 학습이 쉽다"* 입니다. 두 모델의 BatchNorm 출력 표준편차를 layer별로 측정(논문 §4.2 Figure 7 재현)해 이 가설을 데이터로 확인합니다.
+
+**결과 요약**:
+- ResNet-20: **89.16%** vs Plain-20: **86.97%** → **+2.19%p** (Skip Connection의 효과)
+- ResNet의 BN 출력 평균 std가 Plain보다 **10.7% 작음** → 잔차 가설 입증
 
 ---
 
-## 🎯 핵심 목표 (Motivation)
+## 🎯 논문 핵심 개념 정리 (Core Concepts from the Paper)
 
-1. **왜 ResNet인가?** — Skip Connection이 실제로 학습에 어떤 영향을 주는지 확인
-2. **어떻게 파인튜닝 하는가?** — Stage A/B 전략의 설계 근거와 하이퍼파라미터 선택 이유 분석
-3. **더 크면 더 좋은가?** — ResNet50 vs ResNet101, 파라미터 **약 79% 증가** 대비 실제 성능 이득 검증
+### 1. Degradation Problem — ResNet이 풀려고 한 문제 *(논문 §1)*
+
+직관적으로 *깊은 네트워크 = 더 강력한 표현력* 일 것 같지만, 실제로는 어느 깊이부터 깊어질수록 정확도가 떨어지는 현상이 발견됐습니다. 결정적인 증거는 — **학습 오류조차도** 깊은 네트워크에서 더 높았다는 점입니다.
+
+> 과적합이라면 학습 오류는 낮아야 합니다. 학습 오류가 높다는 건 **표현력의 한계가 아니라 최적화의 어려움** 이라는 뜻입니다.
+
+논문은 이걸 깔끔하게 짚습니다 — *"깊은 모델은 적어도 얕은 모델만큼은 해야 한다 (identity layer만 추가하면 되니까). 그런데 SGD가 그 해를 못 찾는다."* 이게 ResNet이 풀어야 했던 문제입니다.
+
+### 2. Residual Learning — 학습 목표를 재정의 *(논문 §3.1)*
+
+기존 방식은 네트워크가 출력 `H(x)`를 **직접** 학습합니다. ResNet은 입력 `x`를 그대로 더해 두고, 차이만큼 — 즉 잔차 `F(x) = H(x) − x` — 만 학습합니다 (`H(x) = F(x) + x`, **Skip Connection**).
+
+왜 이게 쉬운가? 만약 최적해가 identity 매핑(`H(x) = x`)에 가깝다면:
+- **기존**: 여러 conv·BN 층이 정확히 identity를 흉내내야 함 → 어려움
+- **ResNet**: `F(x) → 0` 으로 보내면 됨 → 가중치를 0에 가깝게 보내는 게 훨씬 쉬움
+
+학습 목표를 *"전체 함수 학습"* 에서 *"입력과의 차이만 학습"* 으로 바꾼 게 핵심입니다.
+
+### 3. Skip Connection이 Gradient를 살리는 원리 *(논문 §3.1)*
+
+Plain network에서 gradient는 층을 거슬러 갈 때 가중치들의 곱(`W_N · W_{N-1} · ... · W_1`)이 누적됩니다. 가중치가 1보다 작으면 곱이 0으로 수렴 → **Gradient Vanishing**.
+
+반면 ResNet의 `y = F(x) + x` 를 미분하면 `∂L/∂x = ∂L/∂y · (∂F/∂x + 1)` 이 되어 — **"+1"** 항이 항상 살아있어 `∂F/∂x`가 어떤 값이든 gradient가 0이 될 수 없습니다. 이 한 줄이 152층까지 학습 가능하게 만든 수학적 이유입니다.
+
+### 4. CIFAR-10 ResNet 구조 — 6n+2 Layers *(논문 §4.2)*
+
+논문은 CIFAR-10용으로 가벼운 6n+2 층 구조를 정의합니다:
+
+| Stage | 구성 | 출력 크기 |
+|:------|:-----|:---------|
+| Conv1 | 3×3 Conv, 16 filters | 32×32×16 |
+| Stage 1 | n × Block (16→16) | 32×32×16 |
+| Stage 2 | n × Block (16→32, stride=2) | 16×16×32 |
+| Stage 3 | n × Block (32→64, stride=2) | 8×8×64 |
+| Pool | Global Average Pooling | 64 |
+| FC | Linear(64→10) | 10 |
+
+본 실험은 `n=3` (20 layers) 만 사용합니다. 두 모델은 Block의 종류만 다릅니다:
+- **Plain-20**: `PlainBlock` (skip connection 없음)
+- **ResNet-20**: `BasicBlock` (skip connection 있음)
+
+> 더 깊은 ResNet-50/101/152 는 `BasicBlock` 대신 **Bottleneck Block** (1×1 → 3×3 → 1×1) 을 사용해 계산량을 1/9로 줄이지만, 본 CIFAR-10 실험에서는 사용하지 않습니다.
+
+### 5. Layer Response — 가설을 데이터로 검증 *(논문 §4.2 Figure 7)* ⭐
+
+논문 §4.2 Figure 7은 분량은 짧지만 ResNet의 핵심 가설을 뒷받침하는 가장 결정적인 실증입니다. *"학습된 ResNet의 layer 응답이 plain network보다 작다 → 잔차 F(x)가 실제로 0에 가까운 함수"*. 본 포트폴리오는 BatchNorm 출력에 forward hook을 걸어 이 분석을 직접 재현합니다(fig_03).
+
+### 6. Hyperparameters *(논문 §3.4, §4.2)*
+
+| 항목 | 값 |
+|:-----|:---|
+| Optimizer | SGD (momentum=0.9, weight_decay=1e-4) |
+| Learning Rate | 0.1, 분기점에서 ÷10 |
+| Batch Size | 128 |
+| Epochs | 30 (빠른 데모용; 논문은 200) |
+| LR Schedule | epoch 15·22 에서 ÷10 (논문 비율 50%, 75% 유지) |
+| Augmentation | 4-pixel padding + random crop + horizontal flip |
+| Initialization | He init (`Var(W) = 2/n_in`, ReLU에 맞춤) |
+
+> **Batch Normalization** (Ioffe & Szegedy, 2015) 과 **He Initialization** (He et al., 2015 ICCV) 은 ResNet 논문의 기여가 아니라 *§3.4가 사용하는 외부 기술* 입니다. 두 기술 없이는 깊은 학습이 시작조차 안 되므로, 본 구현이 정확히 적용했음을 명시합니다.
 
 ---
 
 ## 📂 프로젝트 구조 (Project Structure)
-```text
-├─ results/                                     # 성능 평가 및 시각화 결과물 모음
-│  ├─ fig_02_curves_ResNet50.png                # ResNet50 학습 곡선
-│  ├─ fig_02_curves_ResNet101.png               # ResNet101 학습 곡선
-│  ├─ fig_03_accuracy_comparison.png            # 4모델 정확도 비교 막대 그래프
-│  └─ fig_04_efficiency_comparison.png          # 파라미터/정확도/속도 효율 비교
+
+```
 ├─ src/
-│  └─ resnet_transfer_learning_cifar10.py       # 메인 학습 파이프라인 스크립트
-├─ .gitignore                                   
-├─ LICENSE                                      
-├─ README.md                                   
-└─ requirements.txt                            
+│  └─ resnet_from_scratch.py            # 모델 + 학습 + 시각화 통합 스크립트
+├─ results/
+│  ├─ fig_01_training_curves.png        # 학습 곡선 (Plain-20 vs ResNet-20)
+│  ├─ fig_02_accuracy_comparison.png    # 정확도 격차 + Skip Connection 효과 어노테이션
+│  └─ fig_03_layer_response.png         # ⭐ Layer Response (논문 §4.2 Fig.7 재현)
+├─ .gitignore
+├─ LICENSE
+├─ README.md
+└─ requirements.txt
 ```
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ 핵심 구현 (Core Implementation)
 
-### 1. ResNet 핵심 원리: Skip Connection
+### BasicBlock — Skip Connection이 있는 블록
 
-```
-[ 기존 방식 ]           [ ResNet 방식 ]
+3×3 Conv → BN → ReLU → 3×3 Conv → BN 까지 진행한 뒤, forward의 마지막에 `out + self.shortcut(x)` 한 줄로 입력 `x`를 더하고 ReLU를 통과시킵니다 — 이 한 줄이 `H(x) = F(x) + x` 의 코드 표현입니다. 입력과 출력의 차원이 바뀌는 stage 경계(stride=2 + 채널 변경)에서만 shortcut에 1×1 conv를 두어 차원을 맞춥니다 (논문 §3.2 Option B). 차원이 같은 경우 shortcut은 단순 identity (`nn.Identity()`).
 
-  Input (x)               Input (x)
-     ↓                      ↓    ↘ (shortcut)
-  Conv layers            Conv layers
-     ↓                      ↓      ↓
-  H(x) = F(x)            F(x)  +  x
-                             ↓
-                          H(x) = F(x) + x
-                             ↓
-                           ReLU
-```
+### PlainBlock — Skip Connection이 없는 비교용 블록
 
-Skip Connection의 핵심은 네트워크가 **전체 출력 H(x)를 직접 학습하는 대신, 입력 대비 잔차 F(x) = H(x) − x 만을 학습**하게 만드는 구조. 학습이 실패하더라도 F(x) → 0 이 되어 H(x) → x (identity mapping)가 보장되므로, 깊이가 늘어도 성능 저하가 발생하지 않음. 이것이 Gradient Vanishing 없이 152층까지 학습 가능한 핵심 이유!
+BasicBlock의 conv·BN 정의를 모두 그대로 갖되, forward에서 `out + self.shortcut(x)` 한 줄만 빠진 블록입니다. **두 블록의 유일한 차이는 정확히 그 한 줄**이고, 본 실험은 그 한 줄이 만드는 격차를 측정합니다.
 
-### 2. Bottleneck Block (ResNet50 / ResNet101 적용 구조)
+### CIFAR10Net — 같은 클래스로 ResNet/Plain 둘 다 만들기
 
-| 단계 | 연산 | 채널 변화 | 목적 |
-|:----:|------|:---------:|------|
-| 1 | 1×1 Conv + BN + ReLU | 256 → 64 | 차원 압축 (계산량 감소) |
-| 2 | 3×3 Conv + BN + ReLU | 64 → 64 | 핵심 특징 추출 |
-| 3 | 1×1 Conv + BN | 64 → 256 | 차원 복원 |
-| + | Skip Connection | 256 → 256 | 잔차 덧셈 |
-| → | ReLU | — | 비선형 활성화 |
-
-> Basic Block(3×3 → 3×3) 대비 계산량 약 50% 절감, 동일 출력 채널 유지.  
-> 이 구조로 ResNet50 / 101 / 152처럼 50층 이상의 깊은 네트워크 실용적 구현 가능.
-
-### 3. 모델 비교: VGG16 vs ResNet50 vs ResNet101
-
-| 항목 | VGG16 (2014) | ResNet50 (2015) | ResNet101 (2015) |
-|------|:------------:|:---------------:|:----------------:|
-| **레이어 수** | 16 | 50 | 101 |
-| **파라미터 수** ¹ | 138M | 25.6M | 44.5M |
-| **ImageNet Top-5 Error** | 7.3% | 5.25% | 4.60% |
-| **계산량 (GFLOPs)** | 15.5 | 3.8 | 7.6 |
-| **깊이 확장 가능 여부** | ✗ (16층 한계) | ✔ (Skip Connection) | ✔ (Skip Connection) |
-| **블록 구조** | 3×3 Conv 반복 | Bottleneck + Skip | Bottleneck + Skip |
-
-> ¹ 파라미터 수는 ImageNet 1,000-class 분류 헤드(fc1000) 포함 기준.  
-> 본 실험에서는 CIFAR-10용 커스텀 헤드(Dense 256 → Dense 10)로 교체하여  
-> **ResNet50: 24.11M / ResNet101: 43.19M** 으로 소폭 감소.
+`block` 인자만 바꾸면 동일한 깊이·파라미터의 두 모델이 만들어집니다 — `block=BasicBlock` 이면 ResNet-20, `block=PlainBlock` 이면 같은 깊이의 비교 baseline. block 추상화 하나로 두 모델이 동일한 학습 루프를 공유하도록 설계해, *비교의 본질*이 코드 구조에도 그대로 반영됩니다.
 
 ---
 
-## 🎯 파인튜닝 전략 (Fine-Tuning Strategy: Stage A → Stage B)
+## 📊 실험 결과 (Experimental Results)
 
-### 1. 전체 학습 흐름
+### 1. 학습 곡선 — Plain-20 vs ResNet-20
 
-```
-[Stage A] Backbone 완전 동결 (trainable = False)
-  → Head (GAP → Dense(256) → Dropout → Dense(10)) 단독 학습
-  → LR = 1e-3  |  Epochs = 5 (EarlyStopping 적용)
-  → 목표: ImageNet 특징 기반 헤드 초기 적응
+![training curves](results/fig_01_training_curves.png)
 
-          ↓  Stage A 완료
+같은 LR 스케줄·같은 데이터·같은 초기화에서 학습된 두 모델의 테스트 정확도. **ResNet-20(파랑)이 epoch 1부터 일관되게 Plain-20(빨강) 위에** 위치합니다. 이는 두 모델이 epoch 1부터 *서로 다른 최적화 경로* 를 따라간다는 뜻이고, 이 격차는 학습이 끝날 때까지 좁혀지지 않습니다 — Skip Connection 한 줄이 만드는 차이가 *우연*이 아니라 *구조적 차이*에서 비롯된다는 첫 번째 증거입니다.
 
-[Stage B] Backbone 상위 30개 레이어 해동 (Unfreeze)
-  → 해동된 백본 상위 레이어 + 헤드 동시 학습
-  → LR = 5e-6  |  clipnorm = 1.0  |  Epochs = 5 (EarlyStopping 적용)
-  → 목표: CIFAR-10 특화 고수준 특징 미세 조정
-```
+LR 분기점(epoch 15, 22)에서 두 모델 모두 정확도가 점프하는 패턴이 보이는데, 이는 *"넓게 탐색하다가 점점 좁히는"* MultiStep LR 전략이 잘 작동하고 있음을 의미합니다.
 
-### 2. 하이퍼파라미터 설계 및 자원 관리
+### 2. 정확도 격차 — Skip Connection의 순수 효과
 
-| 파라미터 | Stage A 값 | Stage B 값 | 선택 이유 |
-|----------|:----------:|:----------:|-----------|
-| **Batch Size** | 32 | 32 | **NVIDIA P100(16GB) 환경에서 ResNet101 학습 시 OOM 방지 및 안정성 확보** |
-| **Learning Rate** | 1e-3 | 5e-6 | 사전학습 가중치 파괴 방지 — 두 단계 간 200배 차이 |
-| **Gradient Clipping** | 미적용 | clipnorm=1.0 | 깊은 경로 gradient explosion 억제 |
-| **Unfreeze 레이어 수** | 0개 | 상위 30개 | 범용 특징(하위) 보존, 고수준 특징(상위) 재조정 |
-| **EarlyStopping patience** | 3 | 3 | val_loss 기준 조기 종료, 과적합 방지 |
-| **ReduceLROnPlateau factor** | 0.5 | 0.5 | 정체 감지 시 LR 자동 절감 |
-| **Epochs** | 5 | 5 | EarlyStopping으로 실제 종료 시점 자동 결정 |
+![accuracy comparison](results/fig_02_accuracy_comparison.png)
 
-### 3. 레이어별 Freeze 전략
+같은 0.27M 파라미터·같은 20층 깊이에서 **Skip Connection 한 줄**만 다른 두 모델의 최고 정확도. **+2.19%p의 격차** 는:
 
-| 레이어 위치 | 학습되는 특징 수준 | 전략 | 근거 |
-|:-----------:|-------------------|:----:|------|
-| 하위 레이어 | edges, corners, textures (저수준·범용) | **Freeze** | ImageNet 범용 특징 그대로 재활용 |
-| 중간 레이어 | shapes, patterns (중간 수준) | **Freeze** | CIFAR-10으로도 충분히 전이 가능 |
-| 상위 레이어 | 객체 부분, 고수준 의미 정보 | **Unfreeze** | 도메인 특화 재조정 필요 구간 |
+- ❌ 모델 크기 차이 — *둘 다 0.27M 파라미터*
+- ❌ 깊이 차이 — *둘 다 20층*
+- ❌ 학습 설정 차이 — *모두 동일*
+- ✅ **순수하게 `out + shortcut(x)` 한 줄이 만드는 격차**
 
-> ResNet50  기준: 약 175개 레이어 중 30개 해동 → 상위 **17%** 조정  
-> ResNet101 기준: 약 345개 레이어 중 30개 해동 → 상위 **9%** 조정
+논문 §1의 주장 — *"Degradation은 표현력 부족이 아니라 최적화의 문제"* — 이 정확도 숫자 하나로 정확히 입증됩니다.
+
+### 3. Layer Response — 잔차 가설을 데이터로 검증 ⭐
+
+![layer response](results/fig_03_layer_response.png)
+
+논문 §3.1의 핵심 가설 — *"잔차 F(x)는 일반적으로 0에 가깝다"* — 를 검증한 자리입니다. 학습된 두 모델의 모든 `BatchNorm2d` 모듈에 PyTorch forward hook을 걸어 출력의 표준편차를 8 batch 평균으로 측정한 뒤, 논문 Figure 7 우측 panel과 동일한 형식으로 **std 내림차순 정렬**해 두 곡선의 위치 관계를 비교했습니다.
+
+**결과**: ResNet-20의 평균 응답(0.781)이 Plain-20(0.875)보다 **약 10.7% 작음**. 두 곡선이 거의 평행하게 진행하면서 ResNet이 일관되게 Plain 아래에 위치합니다. 이는 Skip Connection이 *gradient를 살리는 트릭*에 그치지 않고, **모델이 잔차 F(x)를 0에 가까운 함수로 학습하도록 유도하는 구조적 편향(inductive bias)** 임을 보여줍니다.
+
+논문 §3.1의 가설이 — 정확도 숫자가 아닌 — **학습된 모델 가중치의 행동**으로 입증되는 자리입니다. 이게 본 포트폴리오의 가장 결정적인 발견입니다.
 
 ---
 
-## 📈 학습 성과 및 지표 (Results)
+## ✨ 분석 및 발견 (Key Findings & Analysis)
 
-### 1. 성능 요약
-| Model | Test Acc | 비고 |
-|-------|:--------:|------|
-| ResNet50  Stage A | **90.32%** | 헤드 단독 학습 |
-| ResNet50  Stage B | **93.22%** | Stage A 대비 **+2.90%p** 향상 |
-| ResNet101 Stage A | **92.10%** | 헤드 단독 학습 |
-| ResNet101 Stage B | **93.49%** | Stage A 대비 **+1.39%p** 향상 |
-
-> 두 모델 모두 파인튜닝(Stage B)을 거치며 93% 이상의 훌륭한 최종 정확도에 도달.
-
-### 2. 시각화 결과물
-
-#### 1) 학습 곡선 (Stage A → B 통합)
-
-![ResNet50 Learning Curves](results/fig_02_curves_ResNet50.png)
-![ResNet101 Learning Curves](results/fig_02_curves_ResNet101.png)
-
-| 항목 | 내용 |
-|------|------|
-| **구성** | Loss + Accuracy 동시 표시, Stage 경계 수직 점선 구분 |
-| **확인 포인트** | 과적합 여부, Stage 전환 시 loss 정체 구간, train/val 곡선 간격 |
-
-**구간별 관찰 포인트:**
-| 구간 | 실제 패턴 | 해석 |
-|------|-----------|------|
-| Stage A 초반 | val_loss 빠른 감소 | 헤드의 급속 적응 |
-| Stage A → B 전환 | loss 일시 정체 | LR 1e-3 → 5e-6 급감 영향 |
-| Stage B 전체 | Train acc가 Val acc를 앞서는 간격 존재 | 미세한 과적합 신호 — 단, val acc는 지속 상승하며 EarlyStopping이 최적 시점 자동 포착 |
-
-#### 2) 모델별 Test Accuracy 비교
-
-![Accuracy Comparison](results/fig_03_accuracy_comparison.png)
-
-| 항목 | 내용 |
-|------|------|
-| **구성** | ResNet50/101 × Stage A/B = 4개 막대, 색상 구분 |
-| **확인 포인트** | Stage B의 일관된 성능 향상, 두 모델 간 격차 |
-
-#### 3) 파라미터 효율성 비교
-
-![Efficiency Comparison](results/fig_04_efficiency_comparison.png)
-
-| 항목 | 내용 |
-|------|------|
-| **구성** | 파라미터 수(M) / Test Accuracy(%) / 추론 속도(ms/img) 3축 가로 막대 |
-| **확인 포인트** | ResNet50의 단위 파라미터 효율 우위 |
-
-
-### 3. 추론 속도 & 파라미터 효율성
-
-| Model | Parameters | Test Acc (Stage B) | Acc / M params | Inference (ms/img) |
-|-------|:----------:|:-----------------:|:--------------:|:-----------------:|
-| ResNet50  | **24.11 M** | **93.22%** | **~3.87** | **14.57** (기준 1×) |
-| ResNet101 | **43.19 M** | **93.49%** | **~2.16** | **27.80** (~1.9× 증가) |
-
-> 📌 **핵심 분석 인사이트**
-> * 파라미터가 약 **79.1% 증가**(24.11M → 43.19M)했음에도, 정확도 향상은 단 **0.27%p**에 그쳤음.
-> * 추론 시간(Latency)은 14.57ms에서 27.80ms로 **거의 2배(1.9배) 가까이 느려졌음.**
-> * 단위 파라미터당 정확도 효율(Acc/M params)을 비교하면, **ResNet50이 약 1.8배 더 효율적**.
+| 발견 | 의미 |
+|:-----|:-----|
+| **Skip Connection의 효과는 표현력이 아니라 최적화** | 같은 깊이·같은 파라미터에서 ResNet이 Plain보다 +2.19%p 좋음. 격차의 원인이 *모델이 표현할 수 있는 함수의 종류*가 아니라 *SGD가 좋은 해를 찾을 수 있는가*의 문제라는 게 통제 비교로 분리됨 |
+| **잔차는 정말 0에 가까웠다** ⭐ | ResNet의 BN 출력 std가 Plain보다 평균 10.7% 작음. 논문 §3.1 가설이 학습된 가중치의 행동으로 입증됨. *Skip Connection은 단지 gradient 우회로가 아니라 모델을 identity 근처에 머물게 하는 inductive bias* |
+| **두 효과가 결합되어 깊은 망 학습이 가능** | (1) gradient flow에서 `(∂F/∂x + 1)`의 "+1" 항이 vanishing 방지 — *이론* (2) 실제로 모델이 F(x)를 0에 가깝게 학습 — *실증*. 두 효과가 결합되어 152층 학습이 현실에서 동작 |
+| **LR MultiStep의 효과가 곡선에서 보임** | epoch 15, 22에서 LR을 10배씩 낮출 때마다 두 모델 모두 정확도가 점프. *"넓게 탐색 → 두 번 좁히기"* 전략의 효과가 학습 곡선에 그대로 찍힘 |
 
 ---
 
-## ✨ 주요 결과 및 분석 (Key Findings & Analysis)
+## 💡 회고 (Retrospective)
 
-### 1. Stage A → Stage B 전이 효과: 가중치 범용성 확인
+이번 프로젝트는 ResNet을 라이브러리(`torchvision.models.resnet50`) 한 줄로 부르는 게 아니라 **PyTorch 기본 연산만으로 처음부터 짜 본 작업**이었습니다. ResNet은 개념적으로는 정말 단순합니다 — Conv 두 개에 입력을 한 번 더해 주는 것뿐. 그런데 직접 짜 보니 그 *한 줄*(`out + self.shortcut(x)`)이 얼마나 큰 차이를 만드는지를 데이터로 확인할 수 있었습니다.
 
-Stage A(헤드 단독 학습)만으로도 90%를 상회하는 정확도를 확보했습니다. 이는 224x224 해상도의 ImageNet으로 학습된 가중치가 32x32 저해상도인 CIFAR-10 데이터셋에서도 매우 강력한 **범용 특징 추출기(Feature Extractor)**로 작동함을 보여줍니다. 이후 진행된 Stage B(파인튜닝)는 상위 30개 레이어의 미세 조정을 통해 최종 정확도를 93% 이상으로 끌어올렸습니다.
+**처음에는 욕심이 많았습니다.** ResNet-20/32/56 세 깊이를 모두 학습해 논문 Table 6를 통째로 재현하고, Shortcut Option A/B/C 세 가지를 모두 구현하고, BN과 He init의 효과까지 시각화하는 — 큰 포트폴리오를 만들었습니다. 그런데 *"면접관 관점에서 이게 정말 핵심을 보여 주는가?"* 라는 점검을 받고 정리했습니다. 깊이 효과(20→32→56)는 사실 흔한 ResNet 튜토리얼이 다 다루는 분석이고, BN/He init은 ResNet의 *기여*가 아니라 *외부 의존* 기술이었습니다. 진짜 차별점은 **"Skip Connection의 효과를 같은 조건에서 분리하고, Layer Response로 잔차 가설을 정량 검증한다"** 는 두 메시지였고, 거기에 맞춰 코드를 1,000줄에서 ~280줄로, 시각화를 10개에서 3개로 줄였습니다. *단순한 코드가 더 정확한 이해를 만든다* 는 점을 여러 차례 사이클을 거치며 배웠습니다.
 
-### 2. 왜 ResNet101이 항상 더 좋지 않은가?: Over-parameterization 확인
+가장 흥미로웠던 부분은 **Plain-20과 ResNet-20을 같은 조건으로 학습해 비교한 것**이었습니다. *"같은 깊이·같은 파라미터인데 Skip Connection 한 줄만 빼면 성능이 떨어진다"* 는 사실은 자주 듣는 말이지만, 직접 같은 조건의 두 모델을 학습해 epoch 1부터 30까지 격차가 유지되는 걸 본 뒤에야 정말 이해했습니다 — 이건 *우연한 노이즈*나 *학습이 덜 끝났음*의 문제가 아니라, *Skip Connection 한 줄이 최적화 경관(loss landscape) 자체를 바꾼다* 는 의미였습니다.
 
-실험 결과, ResNet101은 ResNet50 대비 파라미터가 79%나 많지만 정확도 향상은 단 0.27%p에 불과했습니다. CIFAR-10은 10개 클래스의 상대적으로 단순한 과제이기에, ResNet101의 깊은 레이어들이 추출하는 고수준 특징이 모델 성능에 유의미한 기여를 하지 못함을 실험적으로 증명했습니다. 오히려 추론 지연시간(Latency)이 1.9배 증가하는 결과를 초래하여, 문제 복잡도에 최적화된 모델 선택의 중요성을 나타냅니다.
+**Layer Response 분석(fig_03)** 을 마지막에 추가했을 때가 이번 프로젝트에서 가장 *"논문을 진짜 이해했다"* 싶었던 순간이었습니다. 처음엔 *"ResNet이 잘 되는 이유는 gradient vanishing을 막아 주기 때문"* 정도로만 알고 있었는데 — 학습된 두 모델의 BN 출력에 forward hook을 걸어 std를 직접 측정해 보니, **ResNet의 응답이 Plain보다 일관되게 작았습니다.** 이게 §3.1의 *"잔차가 0에 가까울수록 학습이 쉽다"* 가설을, *"학습된 가중치에 새겨진 사실"* 로 보여 주는 자리였습니다. 논문 §4.2 Figure 7이 텍스트로는 짧게 다뤄지지만 코드로 직접 그려 보고 나서야 — Skip Connection이 *gradient를 살리는 트릭* 그 이상의 의미, 즉 **모델이 identity 근처를 탐색하도록 유도하는 구조적 편향** 임이 와닿았습니다. *"잘 작동한다"* 가 아니라 *"왜 잘 작동하는지"* 를 데이터로 들여다보는 경험은 처음이었고, 이게 이번 프로젝트의 가장 깊은 결과였습니다.
 
-### 3. 실무 적용 시 모델 선택 기준
-
-| 시나리오 | 추천 모델 | 이유 |
-|----------|:---------:|------|
-| 모바일 / 엣지 디바이스 | ResNet50 | 파라미터 효율성(Acc/M) 극대화, 낮은 메모리 점유율 |
-| 실시간 추론 서비스 | ResNet50 | 낮은 지연시간(Low Latency) 확보를 통한 사용자 경험 개선 |
-| 소규모 데이터셋 (수만 장 이하) | ResNet50 | 과도한 파라미터로 인한 과적합(Overfitting) 위험 방지 |
-| 고해상도 정밀 의료 영상 / 정밀 분류 | ResNet101+ | 미세한 특징 구분이 최우선인 정확도 극대화 환경 |
-| 클래스가 많은 대규모 데이터셋 (100만 장+) | ResNet101+ | 충분한 데이터 양으로 깊은 레이어의 표현력 극대화 |
+다음에는 이 베이스로 *"Identity Mappings in Deep Residual Networks"* (Pre-activation ResNet) 을 비교 구현해 보고 싶습니다. Skip Connection의 위치(post-activation vs pre-activation)가 fig_03 의 Layer Response 패턴을 어떻게 바꾸는지를 같은 코드 위에서 비교 실험할 수 있을 것 같습니다.
 
 ---
 
-## 💡 회고록 (Retrospective)
-이 프로젝트는 프레임워크의 내장 모델을 불러와 fit()을 실행하는 것을 넘어, 전이학습이 실제로 어떻게 작동하는지 직접 확인하고 조정해 보는 과정이었습니다. 미세 조정을 Stage A와 Stage B로 나눠 설계해 보면서, 학습 단계의 목적에 따라 하이퍼파라미터와 레이어 동결 전략이 완전히 달라져야 한다는 걸 직접 손으로 익혔습니다..
+## 🔗 참고 자료 (References)
 
-특히 기억에 남는 건 단일 GPU(NVIDIA P100, 16GB) 환경에서 ResNet101 학습 중 맞닥뜨린 OOM(Out Of Memory) 에러를 잡아낸 과정입니다. BATCH_SIZE=64로 설정했을 때 두 모델을 연달아 처리하면서 VRAM 한계를 넘는다는 걸 디버깅으로 확인했고, 배치 사이즈를 32로 줄여 메모리 여유를 만들었습니다. 추론 벤치마크 단계에서는 tf.data 파이프라인을 unbatch().batch(16)으로 다시 구성해서 메모리 문제가 반복되지 않도록 막았습니다. 직접 부딪혀 해결한 경험이라 이후에 비슷한 상황이 생기면 바로 어디를 봐야 할지 알 것 같았습니다.
-
-Learning Rate 설계에서도 배운 게 많았습니다. Stage A에서는 1e-3을 쓰다가, Stage B에서 Backbone 레이어를 열었을 때는 5e-6으로 200배나 낮춰야 했습니다. "파인튜닝할 때는 LR을 작게"라는 말은 이전에도 들었지만, 이번엔 이유가 분명하게 와 닿았습니다. ImageNet으로 이미 잘 학습된 가중치가 있는데, LR이 크면 그 가중치를 그냥 덮어버리는 셈이니까요.
-
-   데이터 분할 과정에서는 Test Set을 Early Stopping이나 LR Scheduler 모니터링에 쓰면 안 된다는 점을 다시 한번 확실히 정리했습니다. 모델이 Test Set에 간접적으로 맞춰지면, 실제로 쓸 때 성능이 부풀려진 채로 배포될 수 있기 때문입니다. 그래서 Train Set 안에서 10%를 층화 추출로 따로 떼어 Validation Set으로만 쓰고, Test Set은 최종 평가 때 한 번만 사용했습니다.
-
-마지막으로, ResNet50과 ResNet101을 직접 비교해 보니 "더 크면 더 좋다"는 생각이 항상 맞지는 않다는 걸 숫자로 확인할 수 있었습니다. 파라미터가 79% 늘었는데 정확도는 0.27%p 올랐고, 추론 속도는 거의 두 배 느려졌습니다. 데이터셋의 복잡도에 맞는 모델을 고르는 것 자체가 설계의 일부라는 걸 이번 실험으로 직접 느꼈습니다.
-
-이번 프로젝트는 정확도 숫자만 쫓는 게 아니라, 왜 그 결과가 나왔는지 따져보고 시각화로 확인하는 습관을 들이는 계기가 됐습니다.
+- **He, K., et al.** "Deep Residual Learning for Image Recognition." *CVPR*, 2016. [arXiv:1512.03385](https://arxiv.org/abs/1512.03385)
+- He, K., et al. "Identity Mappings in Deep Residual Networks." *ECCV*, 2016. [arXiv:1603.05027](https://arxiv.org/abs/1603.05027) — *Pre-activation ResNet*
+- Ioffe, S., Szegedy, C. "Batch Normalization." *ICML*, 2015. [arXiv:1502.03167](https://arxiv.org/abs/1502.03167) — *BN 원논문 (ResNet이 사용)*
+- He, K., et al. "Delving Deep into Rectifiers." *ICCV*, 2015. [arXiv:1502.01852](https://arxiv.org/abs/1502.01852) — *He init 원논문 (ResNet이 사용)*
+- PyTorch Docs — `nn.Conv2d`, `nn.BatchNorm2d`, `nn.init.kaiming_normal_`, `optim.SGD`, `MultiStepLR`
